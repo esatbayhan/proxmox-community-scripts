@@ -108,6 +108,20 @@ msg_ok "Wrote compose override"
   echo "Queue Admin: http://<LXC-IP>:3002/admin/${BULL_AUTH_KEY}/queues"
 } >~/firecrawl.creds
 
+msg_info "Starting Firecrawl (pulling images, patience)"
+cd /opt/firecrawl || exit
+$STD docker compose up -d api playwright-service redis rabbitmq nuq-postgres
+for i in {1..60}; do
+  if curl -fsS "http://localhost:3002/v1/health" >/dev/null 2>&1; then
+    msg_ok "Firecrawl is up"
+    break
+  fi
+  sleep 3
+  if [[ $i -eq 60 ]]; then
+    msg_warn "Firecrawl did not answer /v1/health within 180s; check 'docker compose logs'"
+  fi
+done
+
 motd_ssh
 customize
 cleanup_lxc
