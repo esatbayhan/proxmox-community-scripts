@@ -131,7 +131,7 @@ CREATE TABLE IF NOT EXISTS nuq.group_crawl (id uuid NOT NULL, status nuq.group_s
 NUSQL
 $STD docker compose restart api
 for i in {1..60}; do
-  if curl -fsS "http://localhost:3002/" >/dev/null 2>&1; then
+  if curl -fs "http://localhost:3002/v0/health/liveness" >/dev/null 2>&1; then
     msg_ok "Firecrawl is up"
     break
   fi
