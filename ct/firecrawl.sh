@@ -30,6 +30,14 @@ function update_script() {
   msg_info "Updating ${APP}"
   cd /opt/firecrawl || exit
   $STD git pull --ff-only
+  # re-apply image patch (git pull restores upstream compose with build: directives)
+  COMPOSE=/opt/firecrawl/docker-compose.yaml
+  sed -i 's|^  # image: ghcr.io/firecrawl/firecrawl$|  image: ghcr.io/firecrawl/firecrawl|' "$COMPOSE"
+  sed -i 's|^  build: apps/api$|  # build: apps/api|' "$COMPOSE"
+  sed -i 's|^    # image: ghcr.io/firecrawl/playwright-service:latest$|    image: ghcr.io/firecrawl/playwright-service:latest|' "$COMPOSE"
+  sed -i 's|^    build: apps/playwright-service-ts$|    # build: apps/playwright-service-ts|' "$COMPOSE"
+  sed -i 's|^    # image: ghcr.io/firecrawl/nuq-postgres:latest$|    image: ghcr.io/firecrawl/nuq-postgres:latest|' "$COMPOSE"
+  sed -i 's|^    build: apps/nuq-postgres$|    # build: apps/nuq-postgres|' "$COMPOSE"
   $STD docker compose pull api playwright-service redis rabbitmq nuq-postgres
   $STD docker compose up -d api playwright-service redis rabbitmq nuq-postgres
   msg_ok "Updated ${APP}"

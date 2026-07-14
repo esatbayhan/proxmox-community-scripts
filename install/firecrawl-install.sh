@@ -111,14 +111,33 @@ msg_ok "Wrote compose override"
 msg_info "Starting Firecrawl (pulling images, patience)"
 cd /opt/firecrawl || exit
 $STD docker compose up -d api playwright-service redis rabbitmq nuq-postgres
+# wait for nuq-postgres to be healthy, then inject the NuQ schema
+# (the upstream nuq-postgres init script sometimes targets the wrong database)
+for i in {1..30}; do
+  if docker exec firecrawl-nuq-postgres-1 pg_isready -U firecrawl -d firecrawl >/dev/null 2>&1; then
+    break
+  fi
+  sleep 2
+done
+docker exec -i firecrawl-nuq-postgres-1 psql -U firecrawl -d firecrawl -c 'CREATE EXTENSION IF NOT EXISTS pgcrypto' >/dev/null 2>&1
+docker exec -i firecrawl-nuq-postgres-1 psql -U firecrawl -d firecrawl <<'NUSQL' >/dev/null 2>&1
+CREATE SCHEMA IF NOT EXISTS nuq;
+DO $$ BEGIN CREATE TYPE nuq.job_status AS ENUM ('queued','active','completed','failed'); EXCEPTION WHEN duplicate_object THEN null; END $$;
+DO $$ BEGIN CREATE TYPE nuq.group_status AS ENUM ('active','completed','cancelled'); EXCEPTION WHEN duplicate_object THEN null; END $$;
+CREATE TABLE IF NOT EXISTS nuq.queue_scrape (id uuid NOT NULL DEFAULT gen_random_uuid(), status nuq.job_status NOT NULL DEFAULT 'queued'::nuq.job_status, data jsonb, created_at timestamp with time zone NOT NULL DEFAULT now(), priority int NOT NULL DEFAULT 0, lock uuid, locked_at timestamp with time zone, stalls integer, finished_at timestamp with time zone, listen_channel_id text, returnvalue jsonb, failedreason text, owner_id uuid, group_id uuid, CONSTRAINT queue_scrape_pkey PRIMARY KEY (id));
+CREATE TABLE IF NOT EXISTS nuq.queue_scrape_backlog (id uuid NOT NULL DEFAULT gen_random_uuid(), data jsonb, created_at timestamp with time zone NOT NULL DEFAULT now(), priority int NOT NULL DEFAULT 0, listen_channel_id text, owner_id uuid, group_id uuid, times_out_at timestamptz, CONSTRAINT queue_scrape_backlog_pkey PRIMARY KEY (id));
+CREATE TABLE IF NOT EXISTS nuq.queue_crawl_finished (id uuid NOT NULL DEFAULT gen_random_uuid(), status nuq.job_status NOT NULL DEFAULT 'queued'::nuq.job_status, data jsonb, created_at timestamp with time zone NOT NULL DEFAULT now(), priority int NOT NULL DEFAULT 0, lock uuid, locked_at timestamp with time zone, stalls integer, finished_at timestamp with time zone, listen_channel_id text, returnvalue jsonb, failedreason text, owner_id uuid, group_id uuid, CONSTRAINT queue_crawl_finished_pkey PRIMARY KEY (id));
+CREATE TABLE IF NOT EXISTS nuq.group_crawl (id uuid NOT NULL, status nuq.group_status NOT NULL DEFAULT 'active'::nuq.group_status, created_at timestamptz NOT NULL DEFAULT now(), owner_id uuid NOT NULL, ttl int8 NOT NULL DEFAULT 86400000, expires_at timestamptz, CONSTRAINT group_crawl_pkey PRIMARY KEY (id));
+NUSQL
+$STD docker compose restart api
 for i in {1..60}; do
-  if curl -fsS "http://localhost:3002/v1/health" >/dev/null 2>&1; then
+  if curl -fsS "http://localhost:3002/" >/dev/null 2>&1; then
     msg_ok "Firecrawl is up"
     break
   fi
   sleep 3
   if [[ $i -eq 60 ]]; then
-    msg_warn "Firecrawl did not answer /v1/health within 180s; check 'docker compose logs'"
+    msg_warn "Firecrawl did not answer within 180s; check 'docker compose logs'"
   fi
 done
 
